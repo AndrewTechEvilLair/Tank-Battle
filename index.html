@@ -180,6 +180,7 @@ canvas{position:absolute;top:0;left:0;display:block;cursor:crosshair}
 .rv{font-size:11px;color:#e8d5a3;font-family:'Orbitron',sans-serif}
 #r-hit{color:#f64;font-size:11px;font-family:'Orbitron',sans-serif;margin-bottom:10px}
 #r-hit.miss{color:#888}
+#r-hit.direct{color:#ffe040;text-shadow:0 0 12px #ffe04088}
 #next-btn{background:linear-gradient(135deg,#cc3300,#ff6600);color:#fff;border:none;font-family:'Orbitron',sans-serif;font-size:11px;font-weight:700;letter-spacing:2px;padding:8px 20px;cursor:pointer;border-radius:2px;width:100%;box-shadow:0 0 12px #ff330066}
 #next-btn:hover{box-shadow:0 0 22px #ff3300aa}
 
@@ -211,12 +212,13 @@ canvas{position:absolute;top:0;left:0;display:block;cursor:crosshair}
 <div id="mode-screen">
   <h1>TANK BATTLE</h1>
   <p>CHOOSE YOUR BATTLE</p>
-  <p style="font-size:9px;letter-spacing:3px;color:#7a6040;margin-top:-18px">V1.1</p>
+  <p style="font-size:9px;letter-spacing:3px;color:#7a6040;margin-top:-18px">V1.7</p>
   <div class="mode-btns">
     <button class="mode-btn" onclick="startGame(0)">&#9760; SPECTATOR<span class="mode-sub">watch two AIs fight</span></button>
     <button class="mode-btn" onclick="startGame(1)">&#9673; ONE PLAYER<span class="mode-sub">you vs the machine</span></button>
     <button class="mode-btn" onclick="startGame(2)">&#9876; TWO PLAYERS<span class="mode-sub">hot seat vs friend</span></button>
   </div>
+  <button class="mode-btn" onclick="window.location.href='https://andrewtechevillair.github.io/EvilLair/'" style="margin-top:8px;border-color:#ff6a0077;color:#ff9944;font-size:9px;padding:10px 22px">&#9760; BACK TO EVIL LAIR &#9760;<span class="mode-sub">return to base</span></button>
 </div>
 
 <div id="game-wrap">
@@ -272,13 +274,15 @@ canvas{position:absolute;top:0;left:0;display:block;cursor:crosshair}
     </div>
   </div>
 
-  <!-- BOTTOM: weapon chips only -->
+  <!-- BOTTOM: move buttons + weapon chips -->
   <div id="ui">
+    <button class="wpn-chip" id="move-left" onpointerdown="startMove(-1)" onpointerup="stopMove()" onpointerleave="stopMove()">&#9664; MOVE<span id="fuel-disp"></span></button>
     <button class="wpn-chip selected" data-wpn="shell" onclick="selectWeapon('shell')">SHELL</button>
     <button class="wpn-chip" data-wpn="mirv" onclick="selectWeapon('mirv')">MIRV<span id="ammo-mirv"></span></button>
     <button class="wpn-chip" data-wpn="nuke" onclick="selectWeapon('nuke')">NUKE<span id="ammo-nuke"></span></button>
     <button class="wpn-chip" data-wpn="dirt" onclick="selectWeapon('dirt')">DIRT<span id="ammo-dirt"></span></button>
     <button class="wpn-chip" data-wpn="napalm" onclick="selectWeapon('napalm')">NAPL<span id="ammo-napalm"></span></button>
+    <button class="wpn-chip" id="move-right" onpointerdown="startMove(1)" onpointerup="stopMove()" onpointerleave="stopMove()">MOVE &#9654;<span id="fuel-disp2"></span></button>
     <div id="ai-think">AI THINKING...</div>
   </div>
 </div>
@@ -290,6 +294,8 @@ const ctx = canvas.getContext('2d');
 if(!ctx.roundRect){ctx.roundRect=function(x,y,w,h,r){this.beginPath();this.moveTo(x+r,y);this.lineTo(x+w-r,y);this.quadraticCurveTo(x+w,y,x+w,y+r);this.lineTo(x+w,y+h-r);this.quadraticCurveTo(x+w,y+h,x+w-r,y+h);this.lineTo(x+r,y+h);this.quadraticCurveTo(x,y+h,x,y+h-r);this.lineTo(x,y+r);this.quadraticCurveTo(x,y,x+r,y);this.closePath();};}
 let W, H, terrain, tanks, currentPlayer, projectiles, particles, wind, gameOver, animFrame;
 let wins=[0,0], isAI=[false,false], shotInFlight=false, aiScheduled=false, shotStats=null, gameOverHandled=false;
+// persistentTrails[player] = array of up to 5 shot arcs, each arc = [{x,y},...]
+let persistentTrails=[[],[]];
 // taunt bubble state
 let tauntText='', tauntAlpha=0, tauntFadeTimer=null;
 let turnFlash='', turnFlashAlpha=0, turnFlashTimer=null;
@@ -355,8 +361,8 @@ function generateTerrain(){
 function placeTanks(){
   const p1x=Math.floor(W*0.15),p2x=Math.floor(W*0.85);
   tanks=[
-    {x:p1x,y:terrain[p1x]-TANK_H/2,hp:100,dead:false,angle:45,power:50,ammo:{shell:99,mirv:3,nuke:2,dirt:4,napalm:3}},
-    {x:p2x,y:terrain[p2x]-TANK_H/2,hp:100,dead:false,angle:45,power:50,ammo:{shell:99,mirv:3,nuke:2,dirt:4,napalm:3}}
+    {x:p1x,y:terrain[p1x]-TANK_H/2,hp:100,dead:false,angle:45,power:50,fuel:50,ammo:{shell:99,mirv:3,nuke:2,dirt:4,napalm:3}},
+    {x:p2x,y:terrain[p2x]-TANK_H/2,hp:100,dead:false,angle:45,power:50,fuel:50,ammo:{shell:99,mirv:3,nuke:2,dirt:4,napalm:3}}
   ];
 }
 
@@ -365,7 +371,7 @@ function initGame(){
   if(!W||!H){console.error('Canvas zero size',W,H);return;}
   generateTerrain();placeTanks();
   projectiles=[];particles=[];currentPlayer=0;wind=(Math.random()-0.5)*4;
-  gameOver=false;gameOverHandled=false;shotInFlight=false;aiScheduled=false;shotStats=null;tapPulse=0;tauntText='';tauntAlpha=0;turnFlash='';turnFlashAlpha=0;selectedWeapon='shell';
+  gameOver=false;gameOverHandled=false;shotInFlight=false;aiScheduled=false;shotStats=null;tapPulse=0;tauntText='';tauntAlpha=0;turnFlash='';turnFlashAlpha=0;selectedWeapon='shell';persistentTrails=[[],[]];
   document.getElementById('message').style.opacity=0;
   document.getElementById('end-btns').style.display='none';
   document.getElementById('shot-report').style.display='none';
@@ -448,10 +454,6 @@ function updateUI(){
   const wd=wind>0?'&#8594;':'&#8592;';
   document.getElementById('wind-val').innerHTML=wd+' '+Math.abs(wind).toFixed(1);
   if(tanks){
-    document.getElementById('ang').value=tanks[currentPlayer].angle;
-    document.getElementById('ang-d').textContent=tanks[currentPlayer].angle+'°';
-  }
-  if(tanks){
     document.getElementById('ang').value=180-(tanks[currentPlayer].angle||45); // inverted slider
     document.getElementById('pwr').value=tanks[currentPlayer].power||50;
   }
@@ -459,7 +461,7 @@ function updateUI(){
   const humanTurn=!isAI[currentPlayer]&&!gameOver&&!shotInFlight;
   document.getElementById('ang').disabled=!humanTurn;
   document.getElementById('pwr').disabled=!humanTurn;
-  document.getElementById('wpn').disabled=!humanTurn;
+  // weapon chips handled by updateWeaponChips()
   // If current weapon is out of ammo reset to shell
   if(tanks&&tanks[currentPlayer]){
     const ammo=tanks[currentPlayer].ammo||{};
@@ -490,6 +492,14 @@ function getWeapon(){return selectedWeapon;}
 function updateWeaponChips(){
   const ammo=tanks&&tanks[currentPlayer]?tanks[currentPlayer].ammo||{}:{};
   const humanTurn=tanks&&!isAI[currentPlayer]&&!gameOver&&!shotInFlight;
+  // Update move buttons and fuel display
+  const fuel=tanks&&tanks[currentPlayer]?Math.ceil(tanks[currentPlayer].fuel||0):0;
+  const ml=document.getElementById('move-left'),mr=document.getElementById('move-right');
+  const fd=document.getElementById('fuel-disp'),fd2=document.getElementById('fuel-disp2');
+  if(ml)ml.classList.toggle('disabled',!humanTurn||fuel<=0);
+  if(mr)mr.classList.toggle('disabled',!humanTurn||fuel<=0);
+  if(fd)fd.textContent=humanTurn?' '+fuel+'F':'';
+  if(fd2)fd2.textContent='';
   document.querySelectorAll('.wpn-chip').forEach(btn=>{
     const w=btn.dataset.wpn;
     const cnt=w==='shell'?null:ammo[w]??0;
@@ -515,9 +525,52 @@ function fire(calledByAI){
   }
   const ea=currentPlayer===0?angleDeg:(180-angleDeg),rad=ea*Math.PI/180,spd=power*0.18;
   const bx=tank.x+Math.cos(rad)*BARREL_LEN,by=tank.y-TANK_H/2-Math.sin(rad)*BARREL_LEN;
-  projectiles.push({x:bx,y:by,vx:Math.cos(rad)*spd,vy:-Math.sin(rad)*spd,weapon,trail:[],alive:true});
+  // start a new arc for this shot; keep last 4 so adding this makes 5 max
+  if(persistentTrails[currentPlayer].length>=5)persistentTrails[currentPlayer].shift();
+  persistentTrails[currentPlayer].push([]);
+  projectiles.push({x:bx,y:by,vx:Math.cos(rad)*spd,vy:-Math.sin(rad)*spd,weapon,trail:[],alive:true,owner:currentPlayer});
   shotInFlight=true;tapPulse=0;
   shotStats={weapon,angle:angleDeg,power,startX:tank.x,startY:tank.y,peakY:by,landX:null,damage:0,firedBy:currentPlayer};
+}
+
+
+// ── MOVEMENT / FUEL ───────────────────────────────────────────────────────────
+const MOVE_SPEED = 1.5;   // px per frame
+const FUEL_COST  = 0.08;  // fuel per px moved
+let moveDir = 0;
+let moveInterval = null;
+
+function startMove(dir){
+  if(gameOver||shotInFlight||isAI[currentPlayer])return;
+  moveDir=dir;
+  if(moveInterval)clearInterval(moveInterval);
+  moveInterval=setInterval(doMove, 16);
+}
+function stopMove(){
+  moveDir=0;
+  if(moveInterval){clearInterval(moveInterval);moveInterval=null;}
+}
+function doMove(){
+  if(gameOver||shotInFlight||isAI[currentPlayer]){stopMove();return;}
+  const t=tanks[currentPlayer];
+  if(t.fuel<=0){stopMove();return;}
+  const nx=Math.max(TANK_W/2+2, Math.min(W-TANK_W/2-2, t.x + moveDir*MOVE_SPEED));
+  if(nx===t.x)return;
+  const moved=Math.abs(nx-t.x);
+  t.fuel=Math.max(0, t.fuel - moved*FUEL_COST);
+  t.x=nx;
+  // gravity: snap Y to terrain, allow sliding into craters
+  applyGravity(currentPlayer);
+}
+
+// Slide tank smoothly down slopes each frame (called in loop too so AI tanks also fall)
+function applyGravity(idx){
+  const t=tanks[idx];
+  if(t.dead)return;
+  const tx=Math.floor(Math.max(0,Math.min(W-1,t.x)));
+  const targetY=terrain[tx]-TANK_H/2;
+  // Instantly snap if above ground; allow smooth fall if below (shouldn't happen but safe)
+  t.y=targetY;
 }
 
 // ── TAP / CLICK TO FIRE ───────────────────────────────────────────────────────
@@ -547,14 +600,26 @@ canvas.addEventListener('touchend',e=>{
 // ── EXPLODE ───────────────────────────────────────────────────────────────────
 function explode(x,y,radius,weapon){
   const blastR=weapon==='nuke'?radius*2.5:weapon==='napalm'?radius*1.2:radius;
+  // Fix A: clamp explosion Y to terrain surface so it always detonates at ground level
+  const groundY=terrain[Math.floor(Math.max(0,Math.min(W-1,x)))];
+  const ey=Math.min(y,groundY);
   for(let tx=Math.max(0,Math.floor(x-blastR));tx<Math.min(W,Math.ceil(x+blastR));tx++){
     const dd=tx-x,dy=Math.sqrt(Math.max(0,blastR*blastR-dd*dd));
-    terrain[tx]=weapon==='dirt'?Math.max(H*0.02,terrain[tx]-dy*1.2):Math.max(H*0.02,Math.min(H-5,Math.max(terrain[tx],y+dy)));
+    terrain[tx]=weapon==='dirt'?Math.max(H*0.02,terrain[tx]-dy*1.2):Math.max(H*0.02,Math.min(H-5,Math.max(terrain[tx],ey+dy)));
   }
   tanks.forEach(t=>{const tx=Math.floor(Math.max(0,Math.min(W-1,t.x)));t.y=terrain[tx]-TANK_H/2;});
   tanks.forEach((t,i)=>{
-    if(t.dead)return;const d=Math.hypot(t.x-x,t.y-y);
-    if(d<blastR+15){const dmg=weapon==='nuke'?Math.floor((1-d/(blastR+15))*80):weapon==='napalm'?Math.floor((1-d/(blastR+15))*25):weapon==='dirt'?0:Math.floor((1-d/(blastR+15))*45);if(dmg>0){t.hp-=dmg;if(shotStats)shotStats.damage+=dmg;if(t.hp<=0){t.hp=0;t.dead=true;wins[currentPlayer]++;}}}
+    if(t.dead)return;
+    // Fix B: use min of hypot and horizontal distance — after heavy shelling tanks sit
+    // at the floor and vertical offset can push them outside blast radius on direct hits
+    const d=Math.min(Math.abs(t.x-x),Math.hypot(t.x-x,t.y-ey));
+    if(d<blastR+15){
+      // Base damage by weapon; nuke nerfed 50% (80->40)
+      let dmg=weapon==='nuke'?Math.floor((1-d/(blastR+15))*40):weapon==='napalm'?Math.floor((1-d/(blastR+15))*25):weapon==='dirt'?0:Math.floor((1-d/(blastR+15))*45);
+      // Direct hit bonus: +50% damage if projectile landed within 8px horizontally
+      const directHit=Math.abs(t.x-x)<8;
+      if(directHit&&dmg>0){dmg=Math.floor(dmg*1.5);if(shotStats)shotStats.directHit=true;}
+      if(dmg>0){t.hp-=dmg;if(shotStats)shotStats.damage+=dmg;if(t.hp<=0){t.hp=0;t.dead=true;wins[currentPlayer]++;}}}
   });
   const count=weapon==='nuke'?80:weapon==='napalm'?50:weapon==='dirt'?20:40;
   for(let i=0;i<count;i++){const ang=Math.random()*Math.PI*2,spd=Math.random()*4+1;const pColor=weapon==='dirt'?'hsl('+(30+Math.random()*20)+','+(40+Math.random()*20)+'%,'+(30+Math.random()*20)+'%)':weapon==='napalm'?'hsl('+(Math.random()*30+10)+',100%,60%)':'hsl('+(Math.random()*40+10)+',100%,'+(50+Math.random()*30)+'%)';particles.push({x,y,vx:Math.cos(ang)*spd,vy:Math.sin(ang)*spd-3,life:1,decay:0.015+Math.random()*0.02,r:2+Math.random()*(weapon==='nuke'?6:3),color:pColor});}
@@ -564,6 +629,11 @@ function explode(x,y,radius,weapon){
 function updateProjectile(p){
   if(!p.alive)return;
   p.trail.push({x:p.x,y:p.y});if(p.trail.length>20)p.trail.shift();
+  // accumulate into the current (last) arc for this player
+  if(!p.isSub&&p.owner!==undefined){
+    const arcs=persistentTrails[p.owner];
+    if(arcs.length>0)arcs[arcs.length-1].push({x:p.x,y:p.y});
+  }
   p.vx+=wind*0.003;p.vy+=0.15;p.x+=p.vx;p.y+=p.vy;
   if(shotStats&&p.y<shotStats.peakY)shotStats.peakY=p.y;
   const tx=Math.floor(p.x);
@@ -598,8 +668,9 @@ function showShotReport(isOver){
   const dist=s.landX!==null?Math.round(Math.abs(s.landX-s.startX)):'???';
   const alt=Math.round(Math.max(0,s.startY-s.peakY));
   const wnames={shell:'SHELL',mirv:'MIRV',nuke:'BABY NUKE',dirt:'DIRT',napalm:'NAPALM'};
-  document.getElementById('r-hit').textContent=s.damage>0?('HIT! '+s.damage+' DMG'):'MISS';
-  document.getElementById('r-hit').className='rv'+(s.damage>0?'':' miss');
+  const hitLabel=s.directHit?('DIRECT HIT! '+s.damage+' DMG'):s.damage>0?('HIT! '+s.damage+' DMG'):'MISS';
+  document.getElementById('r-hit').textContent=hitLabel;
+  document.getElementById('r-hit').className='rv'+(s.directHit?' direct':s.damage>0?'':' miss');
   document.getElementById('rp-w').textContent=wnames[s.weapon]||s.weapon.toUpperCase();
   document.getElementById('rp-a').textContent=s.angle+'°';
   document.getElementById('rp-p').textContent=s.power;
@@ -611,7 +682,7 @@ function showShotReport(isOver){
   else{nb.style.display='block';nb.textContent=(s.firedBy===0?"OMEGA'S":"ALPHA'S")+' TURN ▶';}
   document.getElementById('shot-report').style.display='block';
   if(isOver)setTimeout(()=>{document.getElementById('shot-report').style.display='none';},2200);
-  else if(isAI[s.firedBy])setTimeout(()=>advanceTurn(),1800);
+  else if(isAI[s.firedBy])setTimeout(()=>advanceTurn(),2200);
   maybeTaunt(s);
 }
 
@@ -620,11 +691,15 @@ function advanceTurn(){
   if(rep.style.display==='none')return;
   rep.style.display='none';shotStats=null;
   if(checkGameOver())return;
-  currentPlayer=1-currentPlayer;wind=(Math.random()-0.5)*4;tapPulse=0;selectedWeapon='shell';updateUI();
+  currentPlayer=1-currentPlayer;wind=(Math.random()-0.5)*4;tapPulse=0;selectedWeapon='shell';
+  // Refill fuel for the new active player
+  if(tanks)tanks[currentPlayer].fuel=50;
+  updateUI();
   const flashName=currentPlayer===0?'ALPHA':'OMEGA';
   const flashColor=COLORS[currentPlayer];
   showTurnFlash(flashName,flashColor);
-  if(isAI[currentPlayer])scheduleAIShot();
+  // Wait for report to be fully off screen and turn flash to settle before AI shoots
+  if(isAI[currentPlayer])setTimeout(()=>scheduleAIShot(),600);
 }
 
 // ── TRASH TALK ───────────────────────────────────────────────────────────────
@@ -764,6 +839,16 @@ function drawTank(tank,idx){
   ctx.fillText(Math.max(0,tank.hp)+'HP',x,y-TANK_H/2-16);
   if(isAI[idx]){ctx.fillStyle='#fa0';ctx.font='8px Share Tech Mono';ctx.fillText('CPU',x,y-TANK_H/2-26);}
 
+  // Fuel bar — shown below HP label, only when it's this player's turn
+  if(idx===currentPlayer&&!gameOver&&!tank.dead){
+    const fuelPct=Math.max(0,(tank.fuel||0)/50);
+    const bw=TANK_W+4, bx2=x-bw/2, by2=y-TANK_H/2-13;
+    ctx.fillStyle='rgba(0,0,0,0.5)';ctx.fillRect(bx2,by2,bw,3);
+    // color: green→yellow→red as fuel depletes
+    const fc=fuelPct>0.5?'#44ff88':fuelPct>0.25?'#ffcc00':'#ff4422';
+    ctx.fillStyle=fc;ctx.fillRect(bx2,by2,bw*fuelPct,3);
+  }
+
   // Angle + Power readout above tank
   // Show both players' values so you can glance at the enemy's last shot too
   const showAng=tank.angle||45;
@@ -809,6 +894,33 @@ function drawTank(tank,idx){
   }
 }
 
+function drawPersistentTrails(){
+  // Draw last 5 shot arcs per player, oldest=most faded, newest=brightest
+  [0,1].forEach(pi=>{
+    const arcs=persistentTrails[pi];
+    const color=COLORS[pi]; // '#44aaff' or '#ff6644'
+    // parse hex to rgb for rgba use
+    const r=parseInt(color.slice(1,3),16),g=parseInt(color.slice(3,5),16),b=parseInt(color.slice(5,7),16);
+    arcs.forEach((arc,ai)=>{
+      if(arc.length<2)return;
+      // opacity: oldest arc = 0.08, newest = 0.45, linear scale
+      const t=arcs.length===1?1:(ai/(arcs.length-1));
+      const alpha=0.08+t*0.37;
+      // dash pattern: dots spaced 6px apart, faithful to the original
+      ctx.save();
+      ctx.strokeStyle=`rgba(${r},${g},${b},${alpha})`;
+      ctx.lineWidth=1.5;
+      ctx.setLineDash([1,6]);
+      ctx.beginPath();
+      ctx.moveTo(arc[0].x,arc[0].y);
+      for(let i=1;i<arc.length;i++)ctx.lineTo(arc[i].x,arc[i].y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+    });
+  });
+}
+
 function drawProjectiles(){
   projectiles.forEach(p=>{
     if(!p.alive)return;
@@ -843,7 +955,9 @@ function drawTurnFlash(){
 
 function loop(){
   ctx.clearRect(0,0,W,H);
-  drawSky();drawTerrain();drawParticles();drawTank(tanks[0],0);drawTank(tanks[1],1);drawProjectiles();
+  // Apply gravity every frame so tanks slide into craters
+  if(tanks){applyGravity(0);applyGravity(1);}
+  drawSky();drawTerrain();drawPersistentTrails();drawParticles();drawTank(tanks[0],0);drawTank(tanks[1],1);drawProjectiles();
   const prevAlive=projectiles.filter(p=>p.alive).length;
   projectiles.forEach(updateProjectile);projectiles=projectiles.filter(p=>p.alive);
   const nowAlive=projectiles.filter(p=>p.alive).length;
@@ -859,11 +973,11 @@ function loop(){
 window.addEventListener('resize',()=>{
   if(document.getElementById('game-wrap').style.display==='none'||gameOver)return;
   requestAnimationFrame(()=>{
-    const saved=tanks?tanks.map(t=>({hp:t.hp,dead:t.dead,angle:t.angle,power:t.power||50,ammo:t.ammo})):null;
+    const saved=tanks?tanks.map(t=>({hp:t.hp,dead:t.dead,angle:t.angle,power:t.power||50,fuel:t.fuel||0,ammo:t.ammo})):null;
     resize();if(!W||!H)return;generateTerrain();
     const p1x=Math.floor(W*0.15),p2x=Math.floor(W*0.85);
     tanks=[{x:p1x,y:terrain[p1x]-TANK_H/2,hp:100,dead:false,angle:45},{x:p2x,y:terrain[p2x]-TANK_H/2,hp:100,dead:false,angle:45}];
-    if(saved)tanks.forEach((t,i)=>{t.hp=saved[i].hp;t.dead=saved[i].dead;t.angle=saved[i].angle;t.power=saved[i].power||50;t.ammo=saved[i].ammo||{shell:99,mirv:3,nuke:2,dirt:4,napalm:3};});
+    if(saved)tanks.forEach((t,i)=>{t.hp=saved[i].hp;t.dead=saved[i].dead;t.angle=saved[i].angle;t.power=saved[i].power||50;t.fuel=saved[i].fuel||0;t.ammo=saved[i].ammo||{shell:99,mirv:3,nuke:2,dirt:4,napalm:3};});
   });
 });
 
@@ -872,11 +986,11 @@ function checkOrientation(){
   if(portrait){if(animFrame){cancelAnimationFrame(animFrame);animFrame=null;}}
   else if(!animFrame&&document.getElementById('game-wrap').style.display!=='none'){
     requestAnimationFrame(()=>requestAnimationFrame(()=>{
-      const saved=tanks?tanks.map(t=>({hp:t.hp,dead:t.dead,angle:t.angle,power:t.power||50,ammo:t.ammo})):null;
+      const saved=tanks?tanks.map(t=>({hp:t.hp,dead:t.dead,angle:t.angle,power:t.power||50,fuel:t.fuel||0,ammo:t.ammo})):null;
       resize();if(!W||!H)return;generateTerrain();
       const p1x=Math.floor(W*0.15),p2x=Math.floor(W*0.85);
       tanks=[{x:p1x,y:terrain[p1x]-TANK_H/2,hp:100,dead:false,angle:45},{x:p2x,y:terrain[p2x]-TANK_H/2,hp:100,dead:false,angle:45}];
-      if(saved)tanks.forEach((t,i)=>{t.hp=saved[i].hp;t.dead=saved[i].dead;t.angle=saved[i].angle;t.power=saved[i].power||50;t.ammo=saved[i].ammo||{shell:99,mirv:3,nuke:2,dirt:4,napalm:3};});
+      if(saved)tanks.forEach((t,i)=>{t.hp=saved[i].hp;t.dead=saved[i].dead;t.angle=saved[i].angle;t.power=saved[i].power||50;t.fuel=saved[i].fuel||0;t.ammo=saved[i].ammo||{shell:99,mirv:3,nuke:2,dirt:4,napalm:3};});
       loop();
     }));
   }
